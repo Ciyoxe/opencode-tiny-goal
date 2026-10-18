@@ -64,8 +64,9 @@ export class Reminders {
 
         this.countUnansweredReminder(goal)
         if (goal.unansweredReminders >= this.limits.maxUnansweredReminders) {
-            goal.status = "paused"
-            await this.note(rootId, texts.pausedForNoProgress(goal.unansweredReminders))
+            const pushCount = goal.unansweredReminders
+            this.goals.apply(rootId, "pause")
+            await this.note(rootId, texts.pausedForNoProgress(pushCount))
             return
         }
 

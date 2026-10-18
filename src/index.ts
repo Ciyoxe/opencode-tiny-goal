@@ -1,6 +1,7 @@
 import { appendFileSync } from "node:fs"
 import { watchEvents } from "./events"
 import { GoalBook } from "./goals"
+import { GoalPersistence } from "./persistence"
 import { registerGoalCommand, registerGoalTool, registerHooks } from "./registrations"
 import { Reminders } from "./reminders"
 import type { Logger, PluginContext } from "./runtime"
@@ -24,7 +25,9 @@ export default {
         const maxWaitMinutes = Number(context.options.maxWaitMinutes ?? DEFAULT_MAX_WAIT_MINUTES)
         const maxUnansweredReminders = Number(context.options.maxUnansweredReminders ?? DEFAULT_MAX_UNANSWERED_REMINDERS)
 
-        const goals = new GoalBook(maxWaitMinutes)
+        const persistence = new GoalPersistence(context.storage, context.location.project.directory, log)
+        const goals = new GoalBook(maxWaitMinutes, (sessionId, goal) => persistence.update(sessionId, goal))
+        await persistence.restoreInto(goals)
         const sessions = new SessionTree((sessionID) => context.session.get({ sessionID }), log)
         const reminders = new Reminders(context, goals, sessions, { maxUnansweredReminders }, log)
         const services = { goals, sessions, reminders }

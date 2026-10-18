@@ -27,6 +27,10 @@ export type PluginContext = {
     options: Record<string, any>
     location: { directory: string; project: { directory: string } }
     event: { subscribe(): AsyncIterable<RuntimeEvent> }
+    storage: {
+        get(key: string[]): Promise<unknown>
+        set(key: string[], value: unknown): Promise<unknown>
+    }
     session: {
         get(input: { sessionID: string }): Promise<any>
         prompt(input: { sessionID: string; text: string; delivery?: Delivery }): Promise<unknown>

@@ -16,6 +16,11 @@ export type Goal = {
     unansweredReminders: number
 }
 
+/** The part of a goal that survives a restart. */
+export type SavedGoal = Pick<Goal, "text" | "status">
+
+export type GoalChangeListener = (sessionId: string, saved: SavedGoal | undefined) => void
+
 const MS_PER_MINUTE = 60_000
 
 function createGoal(text: string): Goal {
@@ -33,7 +38,10 @@ function createGoal(text: string): Goal {
 export class GoalBook {
     private readonly goals = new Map<string, Goal>()
 
-    constructor(private readonly maxWaitMinutes: number) {}
+    constructor(
+        private readonly maxWaitMinutes: number,
+        private readonly onChange: GoalChangeListener = () => {},
+    ) {}
 
     get(sessionId: string): Goal | undefined {
         return this.goals.get(sessionId)
@@ -44,12 +52,18 @@ export class GoalBook {
     }
 
     remove(sessionId: string): void {
-        this.goals.delete(sessionId)
+        if (this.goals.delete(sessionId)) this.onChange(sessionId, undefined)
     }
 
     /** Sets a new goal, replacing any existing one. */
     start(sessionId: string, text: string): void {
         this.goals.set(sessionId, createGoal(text))
+        this.notifyChanged(sessionId)
+    }
+
+    /** Puts back a goal saved before a restart, without announcing it as a change. */
+    restore(sessionId: string, saved: SavedGoal): void {
+        this.goals.set(sessionId, { ...createGoal(saved.text), status: saved.status })
     }
 
     /** Applies an action and returns a short human-readable result. */
@@ -62,13 +76,15 @@ export class GoalBook {
         switch (action) {
             case "done":
             case "clear":
-                this.goals.delete(sessionId)
+                this.remove(sessionId)
                 return "Goal finished."
             case "pause":
                 goal.status = "paused"
+                this.notifyChanged(sessionId)
                 return "Goal paused."
             case "resume":
                 this.resume(goal)
+                this.notifyChanged(sessionId)
                 return "Goal resumed."
             case "wait":
                 return this.wait(goal, input.minutes)
@@ -96,10 +112,16 @@ export class GoalBook {
         if (!trimmed) return "Error: text is required."
         if (goal) {
             goal.text = trimmed
+            this.notifyChanged(sessionId)
             return "Goal updated."
         }
         this.start(sessionId, trimmed)
         return "Goal set."
+    }
+
+    private notifyChanged(sessionId: string): void {
+        const goal = this.goals.get(sessionId)
+        if (goal) this.onChange(sessionId, { text: goal.text, status: goal.status })
     }
 
     private resume(goal: Goal): void {

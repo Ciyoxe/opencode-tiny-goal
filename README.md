@@ -34,7 +34,7 @@ opencode can also finish, reword or pause the goal on its own when it needs to.
 
 If reminders get ignored 5 times in a row, the goal is paused automatically. Use `/goal resume` to continue.
 
-Goals are not saved, so they are gone after you restart opencode.
+Goals are saved, so they survive a restart of opencode. After a restart the plugin does not wake anything up by itself. The goal carries on the next time you write in that session.
 
 ## Settings (optional)
 

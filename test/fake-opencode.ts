@@ -28,8 +28,35 @@ class EventFeed implements AsyncIterable<RuntimeEvent> {
     }
 }
 
+/** Storage that outlives a plugin instance, like opencode's on-disk storage outlives a restart. */
+export class FakeStorage {
+    readonly values = new Map<string, unknown>()
+    failReads = false
+    failWrites = false
+
+    readonly api: PluginContext["storage"] = {
+        get: async (key) => {
+            if (this.failReads) throw new Error("storage unavailable")
+            return structuredClone(this.values.get(JSON.stringify(key)))
+        },
+        set: async (key, value) => {
+            if (this.failWrites) throw new Error("storage unavailable")
+            this.values.set(JSON.stringify(key), structuredClone(value))
+        },
+    }
+
+    /** The saved goals of a project, as stored. */
+    goalsOf(projectDirectory: string): unknown {
+        return this.values.get(JSON.stringify(["opencode-tiny-goal", "goals", projectDirectory]))
+    }
+}
+
+type Environment = { storage?: FakeStorage; directory?: string }
+
 /** Starts the real plugin against a fake opencode and exposes what it did. */
-export async function startPlugin(options: Record<string, unknown> = {}) {
+export async function startPlugin(options: Record<string, unknown> = {}, environment: Environment = {}) {
+    const projectDirectory = environment.directory ?? PROJECT_DIRECTORY
+    const storage = environment.storage ?? new FakeStorage()
     const feed = new EventFeed()
     const sentPrompts: { sessionID: string; text: string; delivery?: string }[] = []
     const sentNotes: { sessionID: string; text: string }[] = []
@@ -41,8 +68,9 @@ export async function startPlugin(options: Record<string, unknown> = {}) {
 
     const context: PluginContext = {
         options,
-        location: { directory: PROJECT_DIRECTORY, project: { directory: PROJECT_DIRECTORY } },
+        location: { directory: projectDirectory, project: { directory: projectDirectory } },
         event: { subscribe: () => feed },
+        storage: storage.api,
         session: {
             get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: parentOf[sessionID] } }),
             prompt: async (input) => void sentPrompts.push(input),
@@ -61,6 +89,7 @@ export async function startPlugin(options: Record<string, unknown> = {}) {
     await plugin.setup(context)
 
     return {
+        storage,
         sentPrompts,
         sentNotes,
 
@@ -69,7 +98,7 @@ export async function startPlugin(options: Record<string, unknown> = {}) {
             parentOf[child] = parent
         },
 
-        emit(type: string, data: Record<string, unknown> = {}, directory = PROJECT_DIRECTORY) {
+        emit(type: string, data: Record<string, unknown> = {}, directory = projectDirectory) {
             feed.push({ type, data, location: { directory } })
         },
 
