@@ -4,7 +4,7 @@ import type { CommandInvocation, PluginContext, RuntimeEvent, SystemEntry } from
 export const PROJECT_DIRECTORY = "/project"
 
 type RegisteredCommand = { execute(invocation: CommandInvocation): Promise<void> }
-type RegisteredTool = { execute(input: Record<string, unknown>, call: { sessionID: string }): Promise<string> }
+type RegisteredTool = { execute(input: Record<string, unknown>, call: { sessionID: string }): Promise<{ content: string }> }
 
 /** An async iterable the test can push events into. */
 class EventFeed implements AsyncIterable<RuntimeEvent> {
@@ -77,8 +77,8 @@ export async function startPlugin(options: Record<string, unknown> = {}) {
             return command!.execute({ sessionID, prompt: { text }, delivery })
         },
 
-        callGoalTool(sessionID: string, input: Record<string, unknown>) {
-            return tool!.execute(input, { sessionID })
+        async callGoalTool(sessionID: string, input: Record<string, unknown>) {
+            return (await tool!.execute(input, { sessionID })).content
         },
 
         /** The agent calls some tool; the goal tool itself does not count. */

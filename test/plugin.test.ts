@@ -278,7 +278,7 @@ describe("reminders that get ignored", () => {
     })
 
     it("the limit can be configured", async () => {
-        plugin = await startPlugin({ maxStrikes: 2 })
+        plugin = await startPlugin({ maxUnansweredReminders: 2 })
         await plugin.runCommand(ROOT, "write the docs")
 
         for (let turn = 0; turn < 4; turn++) await endTurn()

@@ -16,13 +16,13 @@ function createLogger(debugFile: string | undefined): Logger {
 }
 
 export default {
-    id: "goal",
+    id: "tiny-goal",
 
     async setup(context: PluginContext) {
         const debugFile = process.env.GOAL_DEBUG
         const log = createLogger(debugFile)
         const maxWaitMinutes = Number(context.options.maxWaitMinutes ?? DEFAULT_MAX_WAIT_MINUTES)
-        const maxUnansweredReminders = Number(context.options.maxStrikes ?? DEFAULT_MAX_UNANSWERED_REMINDERS)
+        const maxUnansweredReminders = Number(context.options.maxUnansweredReminders ?? DEFAULT_MAX_UNANSWERED_REMINDERS)
 
         const goals = new GoalBook(maxWaitMinutes)
         const sessions = new SessionTree((sessionID) => context.session.get({ sessionID }), log)

@@ -1,10 +1,20 @@
-import { Schema } from "effect"
 import type { GoalAction } from "./goals"
 import type { CommandInvocation, PluginContext, ToolCallContext } from "./runtime"
 import type { Services } from "./services"
 import { MESSAGE_PREFIX, systemLine, TOOL_DESCRIPTION } from "./texts"
 
 const GOAL_TOOL_NAME = "goal"
+const GOAL_TOOL_ACTIONS: readonly GoalAction[] = ["done", "set", "pause", "resume", "wait"]
+const GOAL_TOOL_INPUT = {
+    type: "object",
+    properties: {
+        action: { type: "string", enum: GOAL_TOOL_ACTIONS },
+        text: { type: "string", description: "New goal text (for set)" },
+        minutes: { type: "number", description: "Minutes to wait (for wait)" },
+    },
+    required: ["action"],
+    additionalProperties: false,
+}
 const CONTROL_WORDS: readonly string[] = ["pause", "resume", "clear", "status"]
 
 /** Applies a control action and keeps the wake-up timer in line with the result. */
@@ -49,8 +59,8 @@ export async function registerGoalCommand(context: PluginContext, services: Serv
 export async function registerGoalTool(context: PluginContext, services: Services): Promise<void> {
     const run = async (input: { action: GoalAction; text?: string; minutes?: number }, call: ToolCallContext) => {
         const rootId = services.sessions.rootOf(call.sessionID)
-        if (!services.goals.has(rootId)) return "There is no active goal."
-        return applyAction(services, rootId, input.action, input)
+        if (!services.goals.has(rootId)) return { content: "There is no active goal." }
+        return { content: applyAction(services, rootId, input.action, input) }
     }
 
     await context.tool.transform((draft) =>
@@ -58,12 +68,7 @@ export async function registerGoalTool(context: PluginContext, services: Service
             name: GOAL_TOOL_NAME,
             options: { codemode: false },
             description: TOOL_DESCRIPTION,
-            input: Schema.Struct({
-                action: Schema.Literals(["done", "set", "pause", "resume", "wait"]),
-                text: Schema.optional(Schema.String),
-                minutes: Schema.optional(Schema.Number),
-            }),
-            output: Schema.String,
+            input: GOAL_TOOL_INPUT,
             execute: run,
         }),
     )
