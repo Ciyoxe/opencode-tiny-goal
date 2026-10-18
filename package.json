@@ -1,0 +1,13 @@
+{
+  "name": "opencode-goal",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.19.3",
+    "typescript": "^7.0.2"
+  }
+}
