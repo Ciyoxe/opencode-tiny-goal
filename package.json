@@ -1,14 +1,19 @@
 {
-  "name": "opencode-goal",
-  "version": "0.0.1",
-  "type": "module",
-  "main": "src/index.ts",
-  "scripts": {
-    "typecheck": "tsc --noEmit"
-  },
-  "devDependencies": {
-    "@opencode-ai/plugin": "^1.19.3",
-    "@types/node": "^26.6.5",
-    "typescript": "^7.0.2"
-  }
+    "name": "opencode-goal",
+    "version": "0.0.1",
+    "type": "module",
+    "main": "src/index.ts",
+    "scripts": {
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run"
+    },
+    "devDependencies": {
+        "@opencode-ai/plugin": "^1.19.3",
+        "@types/node": "^26.6.5",
+        "typescript": "^7.0.2",
+        "vitest": "^5.0.5"
+    },
+    "dependencies": {
+        "effect": "4.0.0-beta.83"
+    }
 }

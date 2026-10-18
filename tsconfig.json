@@ -8,5 +8,5 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src", ".opencode"]
+  "include": ["src", "test", ".opencode"]
 }
