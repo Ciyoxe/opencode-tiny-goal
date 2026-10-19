@@ -171,6 +171,21 @@ describe("background work", () => {
         expect(plugin.sentPrompts[0]!.sessionID).toBe(ROOT)
     })
 
+    it("takes a subagent's parent from its creation event, so the race with the session lookup cannot push early", async () => {
+        plugin.emit("session.created", { sessionID: "child", parentID: ROOT })
+        plugin.emit("session.step.started", { sessionID: "child" })
+        await flush()
+
+        await endTurn()
+        expect(plugin.sentPrompts).toEqual([])
+
+        plugin.emit("session.step.ended", { sessionID: "child", finish: "stop" })
+        await flush()
+        await endTurn()
+
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
     it("holds reminders while the agent waits on the command it just started", async () => {
         plugin.reportToolCall(ROOT, "bash")
         startShell("sh1")
@@ -515,6 +530,43 @@ describe("failures and interruptions", () => {
 })
 
 describe("events", () => {
+    it("stops listening when the plugin unloads, so a reload cannot leave two instances pushing", async () => {
+        await plugin.runCommand(ROOT, "write the docs")
+        plugin.sentPrompts.length = 0
+
+        plugin.stop()
+        await endTurn()
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("cancels reminders already scheduled when the plugin unloads", async () => {
+        await plugin.runCommand(ROOT, "write the docs")
+        await plugin.runCommand("other", "write the tests")
+        await plugin.callGoalTool("other", { action: "wait", minutes: 10 })
+        plugin.sentPrompts.length = 0
+        plugin.emit("session.step.started", { sessionID: ROOT })
+        plugin.emit("session.step.ended", { sessionID: ROOT, finish: "stop" })
+        await flush()
+
+        plugin.stop()
+        await vi.advanceTimersByTimeAsync(11 * 60_000)
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("treats a forked session as its own, not as a subagent of the original", async () => {
+        plugin.emit("session.forked", { sessionID: "fork", parentID: ROOT })
+        await flush()
+        await plugin.runCommand("fork", "write the tests")
+        plugin.sentPrompts.length = 0
+
+        await endTurn("fork")
+
+        expect(reminderTexts()).toHaveLength(1)
+        expect(plugin.sentPrompts[0]!.sessionID).toBe("fork")
+    })
+
     it("ignores events from other projects", async () => {
         await plugin.runCommand(ROOT, "write the docs")
         plugin.sentPrompts.length = 0

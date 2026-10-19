@@ -26,7 +26,7 @@ export type ToolCallContext = { sessionID: string }
 export type PluginContext = {
     options: Record<string, any>
     location: { directory: string; project: { directory: string } }
-    event: { subscribe(): AsyncIterable<RuntimeEvent> }
+    event: { subscribe(options?: { signal?: AbortSignal }): AsyncIterable<RuntimeEvent> }
     storage: {
         get(key: string[]): Promise<unknown>
         set(key: string[], value: unknown): Promise<unknown>

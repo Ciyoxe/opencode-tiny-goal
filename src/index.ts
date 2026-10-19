@@ -49,6 +49,12 @@ export default {
         await registerGoalCommand(context, services)
         await registerGoalTool(context, services)
         await registerHooks(context, services)
-        watchEvents(context, services, log, Boolean(debugFile))
+        const stopEvents = watchEvents(context, services, log, Boolean(debugFile))
+
+        return () => {
+            stopEvents()
+            reminders.stop()
+            sessions.stop()
+        }
     },
 }

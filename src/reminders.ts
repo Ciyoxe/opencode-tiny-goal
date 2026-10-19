@@ -61,6 +61,17 @@ export class Reminders {
         this.lastPushedAt.delete(rootId)
     }
 
+    /** Cancels every pending timer, so a reloaded plugin instance cannot keep pushing. */
+    stop(): void {
+        for (const timer of this.settleTimers.values()) clearTimeout(timer)
+        for (const timer of this.wakeTimers.values()) clearTimeout(timer)
+        for (const timer of this.recheckTimers.values()) clearTimeout(timer)
+        this.settleTimers.clear()
+        this.wakeTimers.clear()
+        this.recheckTimers.clear()
+        this.lastPushedAt.clear()
+    }
+
     /** Adds a short note to the transcript without starting a model turn. */
     async note(sessionId: string, text: string): Promise<void> {
         await this.context.session

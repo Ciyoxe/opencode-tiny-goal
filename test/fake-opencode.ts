@@ -9,7 +9,8 @@ type RegisteredTool = { execute(input: Record<string, unknown>, call: { sessionI
 /** An async iterable the test can push events into. */
 class EventFeed implements AsyncIterable<RuntimeEvent> {
     private readonly queued: RuntimeEvent[] = []
-    private waiting: ((event: RuntimeEvent) => void) | undefined
+    private waiting: ((event: RuntimeEvent | undefined) => void) | undefined
+    private closed = false
 
     push(event: RuntimeEvent): void {
         if (this.waiting) {
@@ -20,10 +21,24 @@ class EventFeed implements AsyncIterable<RuntimeEvent> {
         this.queued.push(event)
     }
 
+    /** Like the real stream: an abort ends the subscription. */
+    subscribe(signal?: AbortSignal): AsyncIterable<RuntimeEvent> {
+        if (signal) signal.addEventListener("abort", () => this.close(), { once: true })
+        return this
+    }
+
+    close(): void {
+        this.closed = true
+        this.waiting?.(undefined)
+        this.waiting = undefined
+    }
+
     async *[Symbol.asyncIterator](): AsyncGenerator<RuntimeEvent> {
-        while (true) {
+        while (!this.closed) {
             const next = this.queued.shift()
-            yield next ?? (await new Promise<RuntimeEvent>((resolve) => (this.waiting = resolve)))
+            const event = next ?? (await new Promise<RuntimeEvent | undefined>((resolve) => (this.waiting = resolve)))
+            if (event === undefined || this.closed) return
+            yield event
         }
     }
 }
@@ -69,7 +84,7 @@ export async function startPlugin(options: Record<string, unknown> = {}, environ
     const context: PluginContext = {
         options,
         location: { directory: projectDirectory, project: { directory: projectDirectory } },
-        event: { subscribe: () => feed },
+        event: { subscribe: (options) => feed.subscribe(options?.signal) },
         storage: storage.api,
         session: {
             get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: parentOf[sessionID] } }),
@@ -86,12 +101,16 @@ export async function startPlugin(options: Record<string, unknown> = {}, environ
         },
     }
 
-    await plugin.setup(context)
+    const cleanup = await plugin.setup(context)
+    const stop = typeof cleanup === "function" ? cleanup : () => {}
 
     return {
         storage,
         sentPrompts,
         sentNotes,
+
+        /** Unloads the plugin instance, as a reload does. */
+        stop,
 
         /** Makes `child` a subagent of `parent`. */
         setParent(child: string, parent: string) {

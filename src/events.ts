@@ -73,7 +73,7 @@ function buildHandlers({ goals, sessions, reminders }: Services): Record<string,
 }
 
 /** Consumes the runtime event stream in the background and feeds the handlers. */
-export function watchEvents(context: PluginContext, services: Services, log: Logger, debug: boolean): void {
+export function watchEvents(context: PluginContext, services: Services, log: Logger, debug: boolean): () => void {
     const handlers = buildHandlers(services)
     const projectDirectory = context.location.project.directory
 
@@ -82,7 +82,9 @@ export function watchEvents(context: PluginContext, services: Services, log: Log
         if (isOtherProject) return
         if (debug && !NOISY_EVENT.test(event.type)) log("event", event.type, JSON.stringify(event.data).slice(0, 200))
 
-        if (event.data?.sessionID) services.sessions.track(event.data.sessionID)
+        // Only a creation's parentID names a subagent's parent; a fork's names the session it was copied from.
+        const parentId = event.type === "session.created" ? event.data?.parentID : undefined
+        if (event.data?.sessionID) services.sessions.track(event.data.sessionID, parentId)
         try {
             handlers[event.type]?.(event.data ?? {})
         } catch (error) {
@@ -90,7 +92,22 @@ export function watchEvents(context: PluginContext, services: Services, log: Log
         }
     }
 
+    // The subscription must end with the plugin instance, or a reload leaves two instances pushing.
+    const controller = new AbortController()
+    let stopped = false
     void (async () => {
-        for await (const event of context.event.subscribe()) handle(event)
+        try {
+            for await (const event of context.event.subscribe({ signal: controller.signal })) {
+                if (stopped) return
+                handle(event)
+            }
+        } catch (error) {
+            if (!stopped) log("event stream failed", String(error))
+        }
     })()
+
+    return () => {
+        stopped = true
+        controller.abort()
+    }
 }

@@ -43,6 +43,46 @@ describe("SessionTree", () => {
             expect(bare.rootOf("child")).toBe("root")
         })
 
+        it("takes the parent straight from an event, with no lookup", () => {
+            tree.track("child", "root")
+
+            expect(tree.rootOf("child")).toBe("root")
+        })
+
+        it("tries a failed lookup again, but not on every event", async () => {
+            vi.useFakeTimers()
+            try {
+                let attempts = 0
+                const flaky = new SessionTree(
+                    async (id) => {
+                        attempts++
+                        if (attempts === 1) throw new Error("session not ready")
+                        return { data: { id, parentID: "root" } }
+                    },
+                    vi.fn(),
+                    { maxShellMinutes: 5, maxBusyMinutes: 30 },
+                )
+                const learn = () => vi.advanceTimersByTimeAsync(0)
+
+                flaky.track("child")
+                await learn()
+                flaky.track("child")
+                flaky.track("child")
+                await learn()
+                expect(attempts).toBe(1)
+                expect(flaky.rootOf("child")).toBe("child")
+
+                vi.advanceTimersByTime(5_000)
+                flaky.track("child")
+                await learn()
+
+                expect(attempts).toBe(2)
+                expect(flaky.rootOf("child")).toBe("root")
+            } finally {
+                vi.useRealTimers()
+            }
+        })
+
         it("keeps working when the lookup fails", async () => {
             const log = vi.fn()
             const failing = new SessionTree(() => Promise.reject(new Error("boom")), log, {

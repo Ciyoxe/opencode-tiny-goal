@@ -2,6 +2,8 @@ import type { Logger } from "./runtime"
 
 type SessionLookup = (sessionId: string) => Promise<any>
 
+const LOOKUP_RETRY_MS = 5_000
+
 export type SessionTreeOptions = {
     /** How long a just-started shell can count as work, and how often an ignored push may repeat. */
     maxShellMinutes: number
@@ -20,6 +22,8 @@ type RunningShell = {
 /** Tracks which sessions are working, how they nest (subagents), and which shells they may be waiting for. */
 export class SessionTree {
     private readonly parentOf = new Map<string, string | null>()
+    /** When a session's lookup last failed; it is tried again only after LOOKUP_RETRY_MS. */
+    private readonly lookupFailedAt = new Map<string, number>()
     /** Busy sessions with the moment they last started a step. */
     private readonly busySessions = new Map<string, number>()
     private readonly toolCalls = new Map<string, number>()
@@ -40,18 +44,46 @@ export class SessionTree {
         return current
     }
 
-    /** Learns a session's parent in the background; until then it counts as a root. */
-    track(sessionId: string): void {
+    /**
+     * Learns a session's parent. `session.created` carries it, so pass it in; otherwise look it up in
+     * the background. Until the answer arrives the session counts as a root.
+     */
+    track(sessionId: string, parentId?: string | null): void {
+        if (parentId !== undefined) {
+            this.parentOf.set(sessionId, parentId)
+            return
+        }
         if (this.parentOf.has(sessionId)) return
+        // Streaming events arrive many times a second, so a failing lookup must not repeat on each one.
+        const failedAt = this.lookupFailedAt.get(sessionId)
+        if (failedAt !== undefined && Date.now() - failedAt < LOOKUP_RETRY_MS) return
         this.parentOf.set(sessionId, null)
         this.lookupSession(sessionId)
-            .then((response) => this.parentOf.set(sessionId, (response?.data ?? response)?.parentID ?? null))
-            .catch((error) => this.log("session lookup failed", String(error)))
+            .then((response) => {
+                this.lookupFailedAt.delete(sessionId)
+                this.parentOf.set(sessionId, (response?.data ?? response)?.parentID ?? null)
+            })
+            .catch((error) => {
+                // Forget the placeholder so a later event can look the session up again.
+                this.parentOf.delete(sessionId)
+                this.lookupFailedAt.set(sessionId, Date.now())
+                this.log("session lookup failed", String(error))
+            })
     }
 
     forget(sessionId: string): void {
         this.parentOf.delete(sessionId)
+        this.lookupFailedAt.delete(sessionId)
         this.busySessions.delete(sessionId)
+    }
+
+    /** Drops all state, so a reloaded plugin instance starts clean. */
+    stop(): void {
+        this.parentOf.clear()
+        this.lookupFailedAt.clear()
+        this.busySessions.clear()
+        this.toolCalls.clear()
+        this.shells.clear()
     }
 
     markBusy(sessionId: string): void {
