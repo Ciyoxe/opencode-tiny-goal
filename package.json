@@ -1,6 +1,6 @@
 {
     "name": "opencode-tiny-goal",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "description": "A tiny goal plugin for opencode 2.x: /goal keeps the agent working until the goal is done, without nagging while background work runs.",
     "keywords": [
         "opencode",
