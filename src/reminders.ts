@@ -49,7 +49,7 @@ export class Reminders {
     /** Adds a short note to the transcript without starting a model turn. */
     async note(sessionId: string, text: string): Promise<void> {
         await this.context.session
-            .synthetic({ sessionID: sessionId, text, description: "goal", resume: false })
+            .synthetic({ sessionID: sessionId, text, description: text, resume: false })
             .catch((error) => this.log("note failed", String(error)))
     }
 
