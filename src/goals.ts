@@ -2,13 +2,16 @@ export type GoalAction = "set" | "done" | "clear" | "pause" | "resume" | "wait" 
 
 export type GoalActionInput = { text?: string; minutes?: number }
 
+/** Why reminders are off after a run broke: a failure ends with the next successful run, a user stop only when the user writes. */
+export type HaltReason = "failure" | "user"
+
 export type Goal = {
     text: string
     status: "active" | "paused"
     /** No reminders before this timestamp (ms); set by the agent's wait action. */
     waitUntil?: number
-    /** The last run failed or was interrupted, so reminders stay off until the user writes again. */
-    halted: boolean
+    /** Set while the last run failed or the user stopped it. */
+    haltedBy?: HaltReason
     /** A reminder was sent and has not been evaluated yet. */
     reminderPending: boolean
     toolCallsSinceReminder: number
@@ -27,7 +30,6 @@ function createGoal(text: string): Goal {
     return {
         text,
         status: "active",
-        halted: false,
         reminderPending: false,
         toolCallsSinceReminder: 0,
         unansweredReminders: 0,
@@ -95,7 +97,7 @@ export class GoalBook {
     onUserMessage(sessionId: string): void {
         const goal = this.goals.get(sessionId)
         if (!goal) return
-        goal.halted = false
+        goal.haltedBy = undefined
         goal.waitUntil = undefined
         goal.reminderPending = false
         goal.unansweredReminders = 0
@@ -132,6 +134,9 @@ export class GoalBook {
     }
 
     private wait(goal: Goal, requestedMinutes: number | undefined): string {
+        if (requestedMinutes !== undefined && (!Number.isFinite(requestedMinutes) || requestedMinutes <= 0)) {
+            return "Error: minutes must be a positive number."
+        }
         const minutes = Math.min(requestedMinutes ?? this.maxWaitMinutes, this.maxWaitMinutes)
         goal.waitUntil = Date.now() + minutes * MS_PER_MINUTE
         return `Not pushing for ${minutes} min.`

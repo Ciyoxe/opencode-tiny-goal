@@ -1,6 +1,6 @@
 /**
  * The published v2 plugin types lag behind the runtime, so this is the subset of the
- * runtime context the plugin relies on (verified by probing opencode 2.0.31).
+ * runtime context the plugin relies on (verified by probing opencode 2.0.31 and 2.0.32).
  */
 
 export type EventData = Record<string, any>

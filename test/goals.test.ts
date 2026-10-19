@@ -25,17 +25,19 @@ describe("GoalBook", () => {
         it("starts an active goal", () => {
             goals.start(SESSION, "ship it")
 
-            expect(goals.get(SESSION)).toMatchObject({ text: "ship it", status: "active", halted: false })
+            expect(goals.get(SESSION)).toMatchObject({ text: "ship it", status: "active" })
+            expect(goals.get(SESSION)!.haltedBy).toBeUndefined()
             expect(goals.apply(SESSION, "status")).toBe("Goal (active): ship it")
         })
 
         it("replaces an existing goal and resets its state", () => {
             goals.start(SESSION, "first")
-            goals.get(SESSION)!.halted = true
+            goals.get(SESSION)!.haltedBy = "failure"
 
             goals.start(SESSION, "second")
 
-            expect(goals.get(SESSION)).toMatchObject({ text: "second", halted: false })
+            expect(goals.get(SESSION)).toMatchObject({ text: "second" })
+            expect(goals.get(SESSION)!.haltedBy).toBeUndefined()
         })
     })
 
@@ -115,17 +117,24 @@ describe("GoalBook", () => {
         it("caps a longer request at the maximum", () => {
             expect(goals.apply(SESSION, "wait", { minutes: 999 })).toBe(`Not pushing for ${MAX_WAIT_MINUTES} min.`)
         })
+
+        it("rejects a request that is not a positive number", () => {
+            for (const minutes of [-5, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
+                expect(goals.apply(SESSION, "wait", { minutes })).toBe("Error: minutes must be a positive number.")
+            }
+            expect(goals.get(SESSION)!.waitUntil).toBeUndefined()
+        })
     })
 
     describe("events from the session", () => {
         it("a user message clears halting, waiting and reminder counts", () => {
             goals.start(SESSION, "work")
             const goal = goals.get(SESSION)!
-            Object.assign(goal, { halted: true, waitUntil: 123, reminderPending: true, unansweredReminders: 3 })
+            Object.assign(goal, { haltedBy: "user", waitUntil: 123, reminderPending: true, unansweredReminders: 3 })
 
             goals.onUserMessage(SESSION)
 
-            expect(goal).toMatchObject({ halted: false, waitUntil: undefined, reminderPending: false, unansweredReminders: 0 })
+            expect(goal).toMatchObject({ haltedBy: undefined, waitUntil: undefined, reminderPending: false, unansweredReminders: 0 })
         })
 
         it("counts tool calls only for sessions that have a goal", () => {

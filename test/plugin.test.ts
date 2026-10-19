@@ -19,6 +19,15 @@ async function endTurn(sessionID = ROOT, finish = "stop") {
 
 const reminderTexts = () => plugin.sentPrompts.map((prompt) => prompt.text).filter((text) => text.startsWith("[goal]"))
 
+/** A command starts the way opencode's Shell service announces it. */
+function startShell(id: string, sessionID = ROOT) {
+    plugin.emit("shell.created", { info: { id, status: "running", metadata: { sessionID } } })
+}
+
+function endShell(id: string) {
+    plugin.emit("shell.exited", { id, exit: 0, status: "exited" })
+}
+
 beforeEach(async () => {
     vi.useFakeTimers()
     plugin = await startPlugin()
@@ -146,7 +155,7 @@ describe("background work", () => {
         plugin.sentPrompts.length = 0
     })
 
-    it("does not remind while a subagent is working, then reminds once it is done", async () => {
+    it("does not remind while a subagent works, and lets the parent answer its result first", async () => {
         plugin.setParent("child", ROOT)
         plugin.emit("session.step.started", { sessionID: "child" })
         await flush()
@@ -155,27 +164,112 @@ describe("background work", () => {
         expect(plugin.sentPrompts).toEqual([])
 
         await endTurn("child")
+        expect(plugin.sentPrompts).toEqual([])
+
+        await endTurn()
         expect(reminderTexts()).toHaveLength(1)
         expect(plugin.sentPrompts[0]!.sessionID).toBe(ROOT)
     })
 
-    it("does not remind while a shell command is running, then reminds when it exits", async () => {
-        plugin.emit("session.tool.progress", { sessionID: ROOT, metadata: { shellID: "sh1" } })
-        plugin.emit("shell.created", { info: { id: "sh1" } })
+    it("holds reminders while the agent waits on the command it just started", async () => {
+        plugin.reportToolCall(ROOT, "bash")
+        startShell("sh1")
+        await flush()
+
+        await endTurn()
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("tracks the shells of the agent's bash tool, which carry their session in metadata", async () => {
+        plugin.setParent("child", ROOT)
+        plugin.emit("session.step.started", { sessionID: "child" })
+        await flush()
+        plugin.emit("session.step.ended", { sessionID: "child", finish: "stop" })
+        plugin.reportToolCall("child", "bash")
+        startShell("sh1", "child")
         await flush()
 
         await endTurn()
         expect(plugin.sentPrompts).toEqual([])
 
-        plugin.emit("shell.exited", { id: "sh1" })
-        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+        endShell("sh1")
+        await flush()
+        await endTurn()
         expect(reminderTexts()).toHaveLength(1)
     })
 
-    it("ignores shell commands that no tool call of this session started", async () => {
-        plugin.emit("shell.created", { info: { id: "unrelated" } })
+    it("ignores shells without a session", async () => {
+        plugin.emit("shell.created", { info: { id: "sh1", metadata: {} } })
         await flush()
 
+        await endTurn()
+
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
+    it("pushes by itself once a command outlives the shell grace", async () => {
+        plugin.reportToolCall(ROOT, "bash")
+        startShell("sh1")
+        await flush()
+
+        await endTurn()
+        await vi.advanceTimersByTimeAsync(4 * 60_000)
+        expect(plugin.sentPrompts).toEqual([])
+
+        await vi.advanceTimersByTimeAsync(2 * 60_000)
+
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
+    it("repeats an ignored push by itself once per shell window", async () => {
+        plugin.reportToolCall(ROOT, "bash")
+        startShell("sh1")
+        await flush()
+        plugin.reportToolCall(ROOT)
+
+        await endTurn()
+        expect(reminderTexts()).toHaveLength(1)
+
+        await endTurn()
+        await vi.advanceTimersByTimeAsync(4 * 60_000)
+        expect(reminderTexts()).toHaveLength(1)
+
+        await vi.advanceTimersByTimeAsync(2 * 60_000)
+        expect(reminderTexts()).toHaveLength(2)
+
+        endShell("sh1")
+        await flush()
+        await endTurn()
+        expect(reminderTexts()).toHaveLength(3)
+    })
+
+    it("still pauses after enough ignored pushes while a command runs", async () => {
+        plugin.reportToolCall(ROOT, "bash")
+        startShell("sh1")
+        await flush()
+        plugin.reportToolCall(ROOT)
+
+        for (let round = 0; round < 6; round++) {
+            await endTurn()
+            await vi.advanceTimersByTimeAsync(6 * 60_000)
+        }
+
+        expect(reminderTexts()).toHaveLength(5)
+        expect(plugin.sentNotes.at(-1)!.text).toBe(
+            "[goal] Paused: 5 pushes in a row without progress. The user can /goal resume.",
+        )
+    })
+
+    it("a run that keeps looking busy stops holding reminders back after the cap", async () => {
+        plugin.setParent("child", ROOT)
+        plugin.emit("session.step.started", { sessionID: "child" })
+        await flush()
+
+        await endTurn()
+        expect(plugin.sentPrompts).toEqual([])
+
+        await vi.advanceTimersByTimeAsync(31 * 60_000)
         await endTurn()
 
         expect(reminderTexts()).toHaveLength(1)
@@ -222,6 +316,21 @@ describe("waiting", () => {
         await vi.advanceTimersByTimeAsync(11 * 60_000)
 
         expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("rejects a wait that is not a positive number", async () => {
+        expect(await plugin.callGoalTool(ROOT, { action: "wait", minutes: -5 })).toBe(
+            "Error: minutes must be a positive number.",
+        )
+        expect(await plugin.callGoalTool(ROOT, { action: "wait", minutes: 0 })).toBe(
+            "Error: minutes must be a positive number.",
+        )
+
+        await endTurn()
+
+        expect(reminderTexts()).toEqual([
+            "[goal] Not done yet: write the docs. Continue, or call goal(done) if it's achieved.",
+        ])
     })
 })
 
@@ -286,6 +395,17 @@ describe("reminders that get ignored", () => {
         expect(reminderTexts()).toHaveLength(2)
         expect(plugin.sentNotes).toHaveLength(1)
     })
+
+    it("falls back to the defaults for nonsense option values", async () => {
+        plugin = await startPlugin({ maxUnansweredReminders: -3, maxWaitMinutes: "nonsense" })
+        await plugin.runCommand(ROOT, "write the docs")
+
+        for (let turn = 0; turn <= MAX_UNANSWERED_REMINDERS; turn++) await endTurn()
+
+        expect(reminderTexts()).toHaveLength(MAX_UNANSWERED_REMINDERS)
+        expect(plugin.sentNotes).toHaveLength(1)
+        expect(await plugin.callGoalTool(ROOT, { action: "wait", minutes: 999 })).toBe("Not pushing for 30 min.")
+    })
 })
 
 describe("failures and interruptions", () => {
@@ -309,6 +429,69 @@ describe("failures and interruptions", () => {
             expect(reminderTexts()).toHaveLength(1)
         },
     )
+
+    it("a run that succeeds after a failure starts reminders again", async () => {
+        plugin.emit("session.execution.failed", { sessionID: ROOT })
+        await flush()
+        await endTurn()
+        expect(plugin.sentPrompts).toEqual([])
+
+        plugin.emit("session.execution.succeeded", { sessionID: ROOT })
+        await flush()
+        await endTurn()
+
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
+    it.each(["superseded", "inactivity", "shutdown"])(
+        "an interruption for reason %s is cleared by a later success",
+        async (reason) => {
+            plugin.emit("session.execution.interrupted", { sessionID: ROOT, reason })
+            plugin.emit("session.execution.succeeded", { sessionID: ROOT })
+            await flush()
+            await endTurn()
+
+            expect(reminderTexts()).toHaveLength(1)
+        },
+    )
+
+    it("a user stop outlasts later successful runs until the user writes", async () => {
+        plugin.emit("session.execution.interrupted", { sessionID: ROOT, reason: "user" })
+        await flush()
+
+        // A background job cancelled by the stop wakes the agent, and that run succeeds.
+        plugin.emit("session.execution.succeeded", { sessionID: ROOT })
+        await flush()
+        await endTurn()
+        expect(plugin.sentPrompts).toEqual([])
+
+        plugin.emit("session.inbox.enqueued", { sessionID: ROOT, item: { type: "user", payload: { text: "go on" } } })
+        await flush()
+        await endTurn()
+
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
+    it("a failure after a user stop does not let a success undo the stop", async () => {
+        plugin.emit("session.execution.interrupted", { sessionID: ROOT, reason: "user" })
+        plugin.emit("session.step.failed", { sessionID: ROOT })
+        plugin.emit("session.execution.succeeded", { sessionID: ROOT })
+        await flush()
+
+        await endTurn()
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("keeps quiet while runs keep failing", async () => {
+        for (let attempt = 0; attempt < 3; attempt++) {
+            plugin.emit("session.execution.failed", { sessionID: ROOT })
+            await flush()
+            await endTurn()
+        }
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
 
     it("the plugin's own reminder does not count as a user message", async () => {
         plugin.emit("session.execution.failed", { sessionID: ROOT })
