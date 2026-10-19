@@ -2,7 +2,7 @@
 
 Give opencode a goal, and it keeps working until the goal is done.
 
-Works with **opencode 2.x** (tested on 2.0.32).
+For **opencode 2.x**.
 
 ## Install
 
@@ -10,33 +10,31 @@ Works with **opencode 2.x** (tested on 2.0.32).
 opencode plugin add opencode-tiny-goal
 ```
 
-Then restart opencode.
+Restart opencode.
 
 ## Use
-
-Type `/goal` followed by what you want done:
 
 ```
 /goal make all tests pass
 ```
 
-opencode starts working. If it stops before the goal is done, the plugin sends it a short reminder to continue. It stays quiet while opencode is busy with a subagent, and after a subagent finishes it waits for the main agent to pick up the result before pushing again. A command the agent just started, with nothing else called after it, holds reminders back for up to `maxShellMinutes` (5 by default). After that window, or once the agent moves on, reminders keep coming. A push that goes unanswered while a command still runs is repeated at most once per window — after several, the goal pauses like any other ignored goal. No quiet state lasts forever: every reason to hold reminders back expires.
+That's it. When opencode stops before the goal is done, it gets nudged to keep going. When the goal is done, it stops.
 
 | Command | What it does |
 | --- | --- |
-| `/goal <text>` | Set a goal and start working |
-| `/goal` | Show the current goal |
-| `/goal pause` | Stop reminders, keep the goal |
-| `/goal resume` | Start reminders again |
+| `/goal <text>` | Set a goal and start |
+| `/goal` | Show the goal |
+| `/goal pause` | Stop nudging, keep the goal |
+| `/goal resume` | Start nudging again |
 | `/goal clear` | Drop the goal |
 
-opencode can also finish, reword or pause the goal on its own when it needs to.
+Good to know:
 
-If reminders get ignored 5 times in a row, the goal is paused automatically. Use `/goal resume` to continue.
-
-After a failed or interrupted run the plugin goes quiet, and starts pushing again when you write or when a later run succeeds.
-
-Goals are saved, so they survive a restart of opencode. After a restart the plugin does not wake anything up by itself. The goal carries on the next time you write in that session.
+- It doesn't nudge while subagents are running, or while opencode waits on a command it just started.
+- Whether opencode is waiting on a command or left it running in the background (like a dev server) is a guess. A command counts as waited on until opencode does something else, and for at most `maxShellMinutes`. That limit keeps a wrong guess from silencing nudges forever.
+- Press Esc to stop it. It picks up again when you write a message.
+- If opencode ignores 5 nudges in a row, the goal pauses. Use `/goal resume`.
+- Goals survive a restart of opencode.
 
 ## Settings (optional)
 
@@ -51,20 +49,15 @@ Goals are saved, so they survive a restart of opencode. After a restart the plug
 }
 ```
 
-- `maxUnansweredReminders`: how many ignored reminders before the goal is paused (default 5)
-- `maxWaitMinutes`: the longest a wait — or a session that keeps looking busy — can hold reminders back (default 30)
-- `maxShellMinutes`: the window for a command the agent just started, and how often an ignored push may repeat (default 5)
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `maxUnansweredReminders` | 5 | Ignored nudges before the goal pauses |
+| `maxWaitMinutes` | 30 | Longest opencode can ask to be left alone |
+| `maxShellMinutes` | 5 | Longest a command opencode waits on keeps nudges away |
 
-## Good to know
+## Issues
 
-opencode 2.x plugins are new, and a future opencode update may break this plugin. If it does, please open an issue.
-
-## Development
-
-```bash
-npm install
-npm test
-```
+opencode 2.x plugins are new, so an opencode update may break this. If it does, [open an issue](https://github.com/Ciyoxe/opencode-tiny-goal/issues).
 
 ## License
 
