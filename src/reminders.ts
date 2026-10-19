@@ -16,7 +16,7 @@ export class Reminders {
     private readonly wakeTimers = new Map<string, ReturnType<typeof setTimeout>>()
     /** Looks again when a time-limited reason to stay quiet runs out, since no event marks that moment. */
     private readonly recheckTimers = new Map<string, ReturnType<typeof setTimeout>>()
-    /** When each root was last pushed; an ignored push may only repeat after a shell window. */
+    /** When each root was last pushed; while a command runs, pushes are spaced a shell window apart. */
     private readonly lastPushedAt = new Map<string, number>()
 
     constructor(
@@ -82,22 +82,11 @@ export class Reminders {
     private async check(rootId: string): Promise<void> {
         const goal = this.goals.get(rootId)
         if (!goal || goal.status !== "active" || goal.haltedBy) return
-        if (this.sessions.hasActiveWork(rootId)) {
-            this.recheckAt(rootId, this.sessions.shellGraceEndsAt(rootId))
-            return
-        }
+        if (this.sessions.isBusy(rootId)) return
         if (goal.waitUntil !== undefined && goal.waitUntil > Date.now()) return
-        // An ignored push while a command still runs repeats at most once per shell window.
-        const lastPush = this.lastPushedAt.get(rootId)
-        const ignoredPushWindowEnd = lastPush === undefined ? undefined : lastPush + this.limits.maxShellMinutes * MS_PER_MINUTE
-        if (
-            goal.reminderPending &&
-            goal.toolCallsSinceReminder === 0 &&
-            this.sessions.hasRunningShell(rootId) &&
-            ignoredPushWindowEnd !== undefined &&
-            Date.now() < ignoredPushWindowEnd
-        ) {
-            this.recheckAt(rootId, ignoredPushWindowEnd)
+        const shellQuietUntil = this.shellQuietUntil(rootId)
+        if (shellQuietUntil !== undefined && Date.now() < shellQuietUntil) {
+            this.recheckAt(rootId, shellQuietUntil)
             return
         }
 
@@ -117,8 +106,18 @@ export class Reminders {
         await this.sendReminder(rootId, waitJustEnded ? texts.waitOverReminder(goal.text) : texts.reminder(goal.text))
     }
 
-    private recheckAt(rootId: string, time: number | undefined): void {
-        if (time === undefined) return
+    /**
+     * opencode wakes the agent when its command ends, so pushing on every turn while one runs only makes
+     * the agent poll it. A long command, or a dev server that never ends, still gets a push once per window.
+     */
+    private shellQuietUntil(rootId: string): number | undefined {
+        const shellStartedAt = this.sessions.lastShellStartedAt(rootId)
+        if (shellStartedAt === undefined) return undefined
+        const lastPush = this.lastPushedAt.get(rootId) ?? 0
+        return Math.max(shellStartedAt, lastPush) + this.limits.maxShellMinutes * MS_PER_MINUTE
+    }
+
+    private recheckAt(rootId: string, time: number): void {
         clearTimeout(this.recheckTimers.get(rootId))
         const delay = Math.max(0, time - Date.now()) + WAKE_MARGIN_MS
         const timer = setTimeout(() => {

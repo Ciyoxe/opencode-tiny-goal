@@ -13,7 +13,7 @@ describe("SessionTree", () => {
         tree = new SessionTree(
             async (id) => ({ data: { id, parentID: parents[id] } }),
             vi.fn(),
-            { maxShellMinutes: 5, maxBusyMinutes: 30 },
+            { maxBusyMinutes: 30 },
         )
     })
 
@@ -33,10 +33,7 @@ describe("SessionTree", () => {
         })
 
         it("accepts a lookup response without a data wrapper", async () => {
-            const bare = new SessionTree(async (id) => ({ id, parentID: "root" }), vi.fn(), {
-                maxShellMinutes: 5,
-                maxBusyMinutes: 30,
-            })
+            const bare = new SessionTree(async (id) => ({ id, parentID: "root" }), vi.fn(), { maxBusyMinutes: 30 })
             bare.track("child")
             await learnParents()
 
@@ -60,7 +57,7 @@ describe("SessionTree", () => {
                         return { data: { id, parentID: "root" } }
                     },
                     vi.fn(),
-                    { maxShellMinutes: 5, maxBusyMinutes: 30 },
+                    { maxBusyMinutes: 30 },
                 )
                 const learn = () => vi.advanceTimersByTimeAsync(0)
 
@@ -85,10 +82,7 @@ describe("SessionTree", () => {
 
         it("keeps working when the lookup fails", async () => {
             const log = vi.fn()
-            const failing = new SessionTree(() => Promise.reject(new Error("boom")), log, {
-                maxShellMinutes: 5,
-                maxBusyMinutes: 30,
-            })
+            const failing = new SessionTree(() => Promise.reject(new Error("boom")), log, { maxBusyMinutes: 30 })
             failing.track("child")
             await learnParents()
 
@@ -107,17 +101,17 @@ describe("SessionTree", () => {
         })
     })
 
-    describe("hasActiveWork", () => {
+    describe("isBusy", () => {
         it("is false when nothing runs", () => {
-            expect(tree.hasActiveWork("root")).toBe(false)
+            expect(tree.isBusy("root")).toBe(false)
         })
 
         it("is true while the root session is busy", () => {
             tree.markBusy("root")
-            expect(tree.hasActiveWork("root")).toBe(true)
+            expect(tree.isBusy("root")).toBe(true)
 
             tree.markIdle("root")
-            expect(tree.hasActiveWork("root")).toBe(false)
+            expect(tree.isBusy("root")).toBe(false)
         })
 
         it("is true while a subagent is busy, but not for an unrelated root", async () => {
@@ -127,23 +121,20 @@ describe("SessionTree", () => {
 
             tree.markBusy("child")
 
-            expect(tree.hasActiveWork("root")).toBe(true)
-            expect(tree.hasActiveWork("other-root")).toBe(false)
+            expect(tree.isBusy("root")).toBe(true)
+            expect(tree.isBusy("other-root")).toBe(false)
         })
 
         it("stops counting a session that stays busy past the cap", () => {
             vi.useFakeTimers()
             try {
-                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), {
-                    maxShellMinutes: 5,
-                    maxBusyMinutes: 30,
-                })
+                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), { maxBusyMinutes: 30 })
                 timed.markBusy("root")
-                expect(timed.hasActiveWork("root")).toBe(true)
+                expect(timed.isBusy("root")).toBe(true)
 
                 vi.advanceTimersByTime(31 * 60_000)
 
-                expect(timed.hasActiveWork("root")).toBe(false)
+                expect(timed.isBusy("root")).toBe(false)
             } finally {
                 vi.useRealTimers()
             }
@@ -152,20 +143,17 @@ describe("SessionTree", () => {
         it("a fresh step extends the busy window", () => {
             vi.useFakeTimers()
             try {
-                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), {
-                    maxShellMinutes: 5,
-                    maxBusyMinutes: 30,
-                })
+                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), { maxBusyMinutes: 30 })
                 timed.markBusy("root")
                 vi.advanceTimersByTime(20 * 60_000)
                 timed.markBusy("root")
                 vi.advanceTimersByTime(20 * 60_000)
 
-                expect(timed.hasActiveWork("root")).toBe(true)
+                expect(timed.isBusy("root")).toBe(true)
 
                 vi.advanceTimersByTime(11 * 60_000)
 
-                expect(timed.hasActiveWork("root")).toBe(false)
+                expect(timed.isBusy("root")).toBe(false)
             } finally {
                 vi.useRealTimers()
             }
@@ -173,56 +161,17 @@ describe("SessionTree", () => {
     })
 
     describe("running shells", () => {
-        it("counts a command the agent just started as work", () => {
-            tree.shellStarted("sh1", "root")
-
-            expect(tree.hasActiveWork("root")).toBe(true)
-        })
-
-        it("stops counting a command once the agent makes another tool call", () => {
-            tree.shellStarted("sh1", "root")
-            tree.noteToolCall("root")
-
-            expect(tree.hasActiveWork("root")).toBe(false)
-            expect(tree.hasRunningShell("root")).toBe(true)
-        })
-
-        it("stops counting a command that runs past the cap", () => {
+        it("tells when the newest running command started", () => {
             vi.useFakeTimers()
             try {
-                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), {
-                    maxShellMinutes: 5,
-                    maxBusyMinutes: 30,
-                })
-                timed.shellStarted("sh1", "root")
-                expect(timed.hasActiveWork("root")).toBe(true)
+                expect(tree.lastShellStartedAt("root")).toBeUndefined()
 
-                vi.advanceTimersByTime(6 * 60_000)
-
-                expect(timed.hasActiveWork("root")).toBe(false)
-                expect(timed.hasRunningShell("root")).toBe(true)
-            } finally {
-                vi.useRealTimers()
-            }
-        })
-
-        it("tells when the last awaited command stops counting as work", () => {
-            vi.useFakeTimers()
-            try {
-                const timed = new SessionTree(async (id) => ({ data: { id } }), vi.fn(), {
-                    maxShellMinutes: 5,
-                    maxBusyMinutes: 30,
-                })
-                expect(timed.shellGraceEndsAt("root")).toBeUndefined()
-
-                const start = Date.now()
-                timed.shellStarted("sh1", "root")
+                tree.shellStarted("sh1", "root")
                 vi.advanceTimersByTime(60_000)
-                timed.shellStarted("sh2", "root")
-                expect(timed.shellGraceEndsAt("root")).toBe(start + 6 * 60_000)
+                const secondStart = Date.now()
+                tree.shellStarted("sh2", "root")
 
-                timed.noteToolCall("root")
-                expect(timed.shellGraceEndsAt("root")).toBeUndefined()
+                expect(tree.lastShellStartedAt("root")).toBe(secondStart)
             } finally {
                 vi.useRealTimers()
             }
@@ -232,8 +181,13 @@ describe("SessionTree", () => {
             tree.shellStarted("sh1", "root")
             tree.shellEnded("sh1")
 
-            expect(tree.hasRunningShell("root")).toBe(false)
-            expect(tree.hasActiveWork("root")).toBe(false)
+            expect(tree.lastShellStartedAt("root")).toBeUndefined()
+        })
+
+        it("does not count a command as busy work", () => {
+            tree.shellStarted("sh1", "root")
+
+            expect(tree.isBusy("root")).toBe(false)
         })
 
         it("counts a command of a subagent for the root", async () => {
@@ -243,8 +197,8 @@ describe("SessionTree", () => {
 
             tree.shellStarted("sh1", "child")
 
-            expect(tree.hasActiveWork("root")).toBe(true)
-            expect(tree.hasActiveWork("other-root")).toBe(false)
+            expect(tree.lastShellStartedAt("root")).toBeDefined()
+            expect(tree.lastShellStartedAt("other-root")).toBeUndefined()
         })
     })
 })

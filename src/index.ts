@@ -40,7 +40,6 @@ export default {
         const goals = new GoalBook(maxWaitMinutes, (sessionId, goal) => persistence.update(sessionId, goal))
         await persistence.restoreInto(goals)
         const sessions = new SessionTree((sessionID) => context.session.get({ sessionID }), log, {
-            maxShellMinutes,
             maxBusyMinutes: maxWaitMinutes,
         })
         const reminders = new Reminders(context, goals, sessions, { maxUnansweredReminders, maxShellMinutes }, log)

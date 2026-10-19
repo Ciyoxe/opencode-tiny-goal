@@ -79,7 +79,6 @@ export async function registerHooks(context: PluginContext, services: Services):
     await context.tool.hook("execute.before", (call) => {
         if (call.tool === GOAL_TOOL_NAME) return
         services.goals.onToolCall(services.sessions.rootOf(call.sessionID))
-        services.sessions.noteToolCall(call.sessionID)
     })
 
     await context.session.hook("context", (turn) => {

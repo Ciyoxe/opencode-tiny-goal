@@ -5,28 +5,23 @@ type SessionLookup = (sessionId: string) => Promise<any>
 const LOOKUP_RETRY_MS = 5_000
 
 export type SessionTreeOptions = {
-    /** How long a just-started shell can count as work, and how often an ignored push may repeat. */
-    maxShellMinutes: number
     /** How long a session may keep looking busy before reminders resume. */
     maxBusyMinutes: number
 }
 
-/** A shell command a session started, and what the agent looked like when it did. */
+/** A shell command a session started. */
 type RunningShell = {
     sessionId: string
     startedAt: number
-    /** The root's tool-call count when the shell started; a later call means the agent moved on. */
-    toolCallsAtStart: number
 }
 
-/** Tracks which sessions are working, how they nest (subagents), and which shells they may be waiting for. */
+/** Tracks which sessions are working, how they nest (subagents), and which shell commands they run. */
 export class SessionTree {
     private readonly parentOf = new Map<string, string | null>()
     /** When a session's lookup last failed; it is tried again only after LOOKUP_RETRY_MS. */
     private readonly lookupFailedAt = new Map<string, number>()
     /** Busy sessions with the moment they last started a step. */
     private readonly busySessions = new Map<string, number>()
-    private readonly toolCalls = new Map<string, number>()
     private readonly shells = new Map<string, RunningShell>()
 
     constructor(
@@ -82,7 +77,6 @@ export class SessionTree {
         this.parentOf.clear()
         this.lookupFailedAt.clear()
         this.busySessions.clear()
-        this.toolCalls.clear()
         this.shells.clear()
     }
 
@@ -94,63 +88,29 @@ export class SessionTree {
         this.busySessions.delete(sessionId)
     }
 
-    /** An agent tool call; a command started before it is no longer something the agent waits for. */
-    noteToolCall(sessionId: string): void {
-        const rootId = this.rootOf(sessionId)
-        this.toolCalls.set(rootId, (this.toolCalls.get(rootId) ?? 0) + 1)
-    }
-
     shellStarted(shellId: string, sessionId: string): void {
-        const rootId = this.rootOf(sessionId)
-        this.shells.set(shellId, {
-            sessionId,
-            startedAt: Date.now(),
-            toolCallsAtStart: this.toolCalls.get(rootId) ?? 0,
-        })
+        this.shells.set(shellId, { sessionId, startedAt: Date.now() })
     }
 
     shellEnded(shellId: string): void {
         this.shells.delete(shellId)
     }
 
-    /** True while any shell of the root runs, however long ago it started. */
-    hasRunningShell(rootId: string): boolean {
-        return this.shellsFor(rootId).length > 0
+    /** When the newest shell still running in the root or its subagents started, or undefined if none runs. */
+    lastShellStartedAt(rootId: string): number | undefined {
+        const starts = this.shellsFor(rootId).map((shell) => shell.startedAt)
+        return starts.length > 0 ? Math.max(...starts) : undefined
     }
 
     /**
-     * True while the root or a subagent may be working: busy for less than maxBusyMinutes since its
-     * last step began, or a shell it started and did not move on from, for at most maxShellMinutes.
-     * Every reason expires, so nothing can keep a goal silent forever.
+     * True while the root or a subagent is working, for at most maxBusyMinutes since its last step began,
+     * so a session that never reports its end cannot keep a goal silent forever.
      */
-    hasActiveWork(rootId: string): boolean {
+    isBusy(rootId: string): boolean {
         const now = Date.now()
-        const busy = [...this.busySessions].some(
+        return [...this.busySessions].some(
             ([sessionId, since]) => this.rootOf(sessionId) === rootId && now - since < this.options.maxBusyMinutes * 60_000,
         )
-        return busy || this.awaitedShells(rootId).length > 0
-    }
-
-    /**
-     * When the last shell the agent may be waiting for stops counting as work, or undefined if there is none.
-     * Nothing else happens at that moment, so whoever skipped a reminder because of it must look again then.
-     */
-    shellGraceEndsAt(rootId: string): number | undefined {
-        const ends = this.awaitedShells(rootId).map((shell) => shell.startedAt + this.shellWindowMs())
-        return ends.length > 0 ? Math.max(...ends) : undefined
-    }
-
-    /** Running shells of the root that were started after the agent's last tool call and are still in their window. */
-    private awaitedShells(rootId: string): RunningShell[] {
-        const current = this.toolCalls.get(rootId) ?? 0
-        const now = Date.now()
-        return this.shellsFor(rootId).filter(
-            (shell) => shell.toolCallsAtStart === current && now - shell.startedAt < this.shellWindowMs(),
-        )
-    }
-
-    private shellWindowMs(): number {
-        return this.options.maxShellMinutes * 60_000
     }
 
     private shellsFor(rootId: string): RunningShell[] {

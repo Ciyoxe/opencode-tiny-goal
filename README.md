@@ -30,8 +30,8 @@ That's it. When opencode stops before the goal is done, it gets nudged to keep g
 
 Good to know:
 
-- It doesn't nudge while subagents are running, or while opencode waits on a command it just started.
-- Whether opencode is waiting on a command or left it running in the background (like a dev server) is a guess. A command counts as waited on until opencode does something else, and for at most `maxShellMinutes`. That limit keeps a wrong guess from silencing nudges forever.
+- It doesn't nudge while subagents are running.
+- While a command runs, it nudges at most once every `maxShellMinutes`, because opencode wakes itself up when the command ends. The plugin can't tell a command opencode waits on from one left running on purpose (like a dev server), so it doesn't stay quiet forever.
 - Press Esc to stop it. It picks up again when you write a message.
 - If opencode ignores 5 nudges in a row, the goal pauses. Use `/goal resume`.
 - Goals survive a restart of opencode.
@@ -53,7 +53,7 @@ Good to know:
 | --- | --- | --- |
 | `maxUnansweredReminders` | 5 | Ignored nudges before the goal pauses |
 | `maxWaitMinutes` | 30 | Longest opencode can ask to be left alone |
-| `maxShellMinutes` | 5 | Longest a command opencode waits on keeps nudges away |
+| `maxShellMinutes` | 5 | Time between nudges while a command runs |
 
 ## Issues
 

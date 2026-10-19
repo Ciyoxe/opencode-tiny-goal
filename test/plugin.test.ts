@@ -186,8 +186,8 @@ describe("background work", () => {
         expect(reminderTexts()).toHaveLength(1)
     })
 
-    it("holds reminders while the agent waits on the command it just started", async () => {
-        plugin.reportToolCall(ROOT, "bash")
+    it("holds reminders while a command the agent started runs", async () => {
+        plugin.reportToolCall(ROOT, "shell")
         startShell("sh1")
         await flush()
 
@@ -196,12 +196,25 @@ describe("background work", () => {
         expect(plugin.sentPrompts).toEqual([])
     })
 
-    it("tracks the shells of the agent's bash tool, which carry their session in metadata", async () => {
+    it("keeps holding while the agent checks on the command between turns", async () => {
+        plugin.reportToolCall(ROOT, "shell")
+        startShell("sh1")
+        await flush()
+
+        for (let poll = 0; poll < 4; poll++) {
+            await endTurn()
+            plugin.reportToolCall(ROOT, "shell")
+            await vi.advanceTimersByTimeAsync(60_000)
+        }
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("tracks the shells of a subagent, which carry their session in metadata", async () => {
         plugin.setParent("child", ROOT)
         plugin.emit("session.step.started", { sessionID: "child" })
         await flush()
         plugin.emit("session.step.ended", { sessionID: "child", finish: "stop" })
-        plugin.reportToolCall("child", "bash")
         startShell("sh1", "child")
         await flush()
 
@@ -223,8 +236,7 @@ describe("background work", () => {
         expect(reminderTexts()).toHaveLength(1)
     })
 
-    it("pushes by itself once a command outlives the shell grace", async () => {
-        plugin.reportToolCall(ROOT, "bash")
+    it("pushes by itself once a command outlives the shell window", async () => {
         startShell("sh1")
         await flush()
 
@@ -237,17 +249,16 @@ describe("background work", () => {
         expect(reminderTexts()).toHaveLength(1)
     })
 
-    it("repeats an ignored push by itself once per shell window", async () => {
-        plugin.reportToolCall(ROOT, "bash")
+    it("pushes at most once per shell window while a long command runs, then normally once it ends", async () => {
         startShell("sh1")
         await flush()
-        plugin.reportToolCall(ROOT)
-
         await endTurn()
+        await vi.advanceTimersByTimeAsync(6 * 60_000)
         expect(reminderTexts()).toHaveLength(1)
 
+        plugin.reportToolCall(ROOT, "shell")
         await endTurn()
-        await vi.advanceTimersByTimeAsync(4 * 60_000)
+        await vi.advanceTimersByTimeAsync(3 * 60_000)
         expect(reminderTexts()).toHaveLength(1)
 
         await vi.advanceTimersByTimeAsync(2 * 60_000)
@@ -259,11 +270,22 @@ describe("background work", () => {
         expect(reminderTexts()).toHaveLength(3)
     })
 
-    it("still pauses after enough ignored pushes while a command runs", async () => {
-        plugin.reportToolCall(ROOT, "bash")
+    it("a new command starts a new shell window", async () => {
         startShell("sh1")
         await flush()
-        plugin.reportToolCall(ROOT)
+        await vi.advanceTimersByTimeAsync(4 * 60_000)
+        startShell("sh2")
+        await flush()
+
+        await endTurn()
+        await vi.advanceTimersByTimeAsync(4 * 60_000)
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("still pauses after enough ignored pushes while a command runs", async () => {
+        startShell("sh1")
+        await flush()
 
         for (let round = 0; round < 6; round++) {
             await endTurn()
