@@ -1,8 +1,13 @@
 {
     "name": "opencode-tiny-goal",
-    "version": "0.1.1",
+    "version": "0.1.2",
     "description": "A tiny goal plugin for opencode 2.x: /goal keeps the agent working until the goal is done, without nagging while background work runs.",
-    "keywords": ["opencode", "opencode-plugin", "goal", "agent"],
+    "keywords": [
+        "opencode",
+        "opencode-plugin",
+        "goal",
+        "agent"
+    ],
     "license": "WTFPL",
     "author": "Ciyoxe",
     "homepage": "https://github.com/Ciyoxe/opencode-tiny-goal#readme",
@@ -15,7 +20,9 @@
     },
     "type": "module",
     "main": "src/index.ts",
-    "files": ["src"],
+    "files": [
+        "src"
+    ],
     "scripts": {
         "typecheck": "tsc --noEmit",
         "test": "vitest run"
