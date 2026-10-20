@@ -33,7 +33,16 @@ function buildHandlers({ goals, sessions, reminders }: Services): Record<string,
     }
 
     return {
-        "session.step.started": (data) => sessions.markBusy(data.sessionID),
+        "session.step.started": (data) => {
+            const isNewTurn = !sessions.isInTurn(data.sessionID)
+            sessions.markBusy(data.sessionID)
+            // A wait covers the idle time after the turn that asked for it; whatever wakes the agent ends it.
+            // Goals live on root sessions, so a subagent's new turn changes nothing here.
+            if (isNewTurn) {
+                goals.endWait(data.sessionID)
+                reminders.cancelWakeTimer(data.sessionID)
+            }
+        },
         "session.step.ended": (data) => {
             // "tool-calls" means the agent continues with another step
             if (data.finish !== "tool-calls") finishTurn(data.sessionID)

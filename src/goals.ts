@@ -103,6 +103,12 @@ export class GoalBook {
         goal.unansweredReminders = 0
     }
 
+    /** Something else woke the agent (a finished command, a subagent), so the wait it asked for is over. */
+    endWait(sessionId: string): void {
+        const goal = this.goals.get(sessionId)
+        if (goal) goal.waitUntil = undefined
+    }
+
     /** The agent called a tool (other than the goal tool itself). */
     onToolCall(sessionId: string): void {
         const goal = this.goals.get(sessionId)

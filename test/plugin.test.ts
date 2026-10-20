@@ -319,10 +319,19 @@ describe("waiting", () => {
         plugin.sentPrompts.length = 0
     })
 
-    it("holds reminders back until the wait is over, then says so", async () => {
-        expect(await plugin.callGoalTool(ROOT, { action: "wait", minutes: 10 })).toBe("Not pushing for 10 min.")
+    /** The agent asks for a wait during its turn, then ends the turn. */
+    async function waitThenEndTurn(minutes: number) {
+        plugin.emit("session.step.started", { sessionID: ROOT })
+        await flush()
+        const reply = await plugin.callGoalTool(ROOT, { action: "wait", minutes })
+        plugin.emit("session.step.ended", { sessionID: ROOT, finish: "stop" })
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+        return reply
+    }
 
-        await endTurn()
+    it("holds reminders back until the wait is over, then says so", async () => {
+        expect(await waitThenEndTurn(10)).toBe("Not pushing for 10 min.")
+
         await vi.advanceTimersByTimeAsync(9 * 60_000)
         expect(plugin.sentPrompts).toEqual([])
 
@@ -336,8 +345,36 @@ describe("waiting", () => {
         expect(await plugin.callGoalTool(ROOT, { action: "wait", minutes: 999 })).toBe("Not pushing for 30 min.")
     })
 
-    it("a message from the user ends the wait", async () => {
+    it("holds through the rest of the turn that asked for the wait", async () => {
+        plugin.emit("session.step.started", { sessionID: ROOT })
+        await flush()
         await plugin.callGoalTool(ROOT, { action: "wait", minutes: 10 })
+        plugin.emit("session.step.ended", { sessionID: ROOT, finish: "tool-calls" })
+        plugin.emit("session.step.started", { sessionID: ROOT })
+        plugin.reportToolCall(ROOT, "shell")
+        plugin.emit("session.step.ended", { sessionID: ROOT, finish: "stop" })
+        await vi.advanceTimersByTimeAsync(SETTLE_MS)
+
+        expect(plugin.sentPrompts).toEqual([])
+    })
+
+    it("ends the wait when something else wakes the agent, like a finished command", async () => {
+        await waitThenEndTurn(20)
+        await vi.advanceTimersByTimeAsync(60_000)
+        expect(plugin.sentPrompts).toEqual([])
+
+        await endTurn()
+        expect(reminderTexts()).toEqual([
+            "[goal] Not done yet: write the docs. Continue, or call goal(done) if it's achieved.",
+        ])
+
+        plugin.reportToolCall(ROOT)
+        await vi.advanceTimersByTimeAsync(20 * 60_000)
+        expect(reminderTexts()).toHaveLength(1)
+    })
+
+    it("a message from the user ends the wait", async () => {
+        await waitThenEndTurn(10)
 
         plugin.emit("session.inbox.enqueued", { sessionID: ROOT, item: { type: "user", payload: { text: "any news?" } } })
         await flush()
@@ -640,13 +677,12 @@ describe("goal tool", () => {
 })
 
 describe("system prompt", () => {
-    it("shows the active goal to the session that owns it", async () => {
+    it("shows the active goal to the session that owns it, as facts without pressure", async () => {
         await plugin.runCommand(ROOT, "write the docs")
 
-        const [line] = plugin.systemEntriesFor(ROOT)
-
-        expect(line).toContain("Active goal (set by the user): write the docs")
-        expect(line).toContain("goal(done)")
+        expect(plugin.systemEntriesFor(ROOT)).toEqual([
+            "Active goal (set by the user): write the docs\nCall goal(done) once it is fully achieved.",
+        ])
     })
 
     it("shows nothing without a goal or while paused", async () => {

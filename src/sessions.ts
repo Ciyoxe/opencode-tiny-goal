@@ -84,6 +84,11 @@ export class SessionTree {
         this.busySessions.set(sessionId, Date.now())
     }
 
+    /** True between a session's first step and the end of its turn. */
+    isInTurn(sessionId: string): boolean {
+        return this.busySessions.has(sessionId)
+    }
+
     markIdle(sessionId: string): void {
         this.busySessions.delete(sessionId)
     }
